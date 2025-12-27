@@ -10,7 +10,7 @@ import pytesseract
 from pdf2image import convert_from_path
 from firebase_admin import credentials, auth, initialize_app, firestore
 from dotenv import load_dotenv
-
+from pdfminer.high_level import extract_text
 
 
 # =====================
@@ -56,22 +56,19 @@ GEMINI_API_URL = (
 PDF_PATH = "doc.pdf"  # le fichier doit être présent dans backend/
 PDF_TEXT = None
 
+
+
 def read_pdf_ocr(pdf_path: str) -> str:
     if not os.path.exists(pdf_path):
         print("⚠️ PDF introuvable")
         return "Document médical non disponible."
     try:
-        pages_text = []
-        pages = convert_from_path(pdf_path, dpi=50)
-        for i, page in enumerate(pages):
-            text = pytesseract.image_to_string(page, lang="eng+fra")
-            pages_text.append(text)
-        full_text = "\n\n=== PAGE BREAK ===\n\n".join(pages_text)
-        # Préfixer le titre
-        return "PCOS\n\n" + full_text
+        text = extract_text(pdf_path)
+        return "PCOS\n\n" + text  # préfixe titre
     except Exception as e:
         print(f"❌ Erreur lecture PDF: {e}")
         return "Erreur lors de la lecture du document."
+
 
 def get_pdf_text() -> str:
     global PDF_TEXT
