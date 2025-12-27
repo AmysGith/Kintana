@@ -11,6 +11,8 @@ from pdf2image import convert_from_path
 from firebase_admin import credentials, auth, initialize_app, firestore
 from dotenv import load_dotenv
 
+
+
 # =====================
 # INITIALISATION
 # =====================
@@ -60,7 +62,7 @@ def read_pdf_ocr(pdf_path: str) -> str:
         return "Document médical non disponible."
     try:
         pages_text = []
-        pages = convert_from_path(pdf_path)
+        pages = convert_from_path(pdf_path, dpi=50)
         for i, page in enumerate(pages):
             text = pytesseract.image_to_string(page, lang="eng+fra")
             pages_text.append(text)
