@@ -1,96 +1,119 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import pytesseract
 from pdf2image import convert_from_path
 import os
 import requests
-from flask_cors import CORS
 import re
 from dotenv import load_dotenv
 
-load_dotenv()
-load_dotenv()
+# Firebase Admin
+from firebase_admin import credentials, auth, initialize_app
 
+# =====================
+# INITIALISATION
+# =====================
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# =====================
+# CONFIG GEMINI
+# =====================
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+if not GEMINI_API_KEY:
+    raise RuntimeError("❌ GEMINI_API_KEY manquante")
 
-# 🧪 Test (à supprimer après)
-print(f"✅ Clé chargée : {GEMINI_API_KEY[:10]}..." if GEMINI_API_KEY else "❌ Clé non trouvée !")
-# Chemins
+GEMINI_API_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+)
+
+# =====================
+# FIREBASE ADMIN
+# =====================
+
+firebase_app = None
+
+try:
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_app = initialize_app(cred)
+    print("✅ Firebase Admin SDK initialisé")
+except Exception as e:
+    print(f"❌ Firebase Admin indisponible: {e}")
+    firebase_app = None
+
+# =====================
+# OCR / PDF
+# =====================
+
 PDF_PATH = "doc.pdf"
-POPLER_PATH = r"C:\Users\NOMENAHITANTSOA\Downloads\Release-25.07.0-0\poppler-25.07.0\Library\bin"
-TESSERACT_CMD = r"C:\Users\NOMENAHITANTSOA\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+PDF_TEXT = None  # lazy-load
 
-
-pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-
-def contains_personal_info(text):
-    patterns = [
-        r"je m'?appelle\s+\w+",       # "je m'appelle Alice"
-        r"j'ai\s+\d+\s*ans",          # "j'ai 20 ans"
-        r"j'ai\s+\d+\s*mois",         # "j'ai 8 mois"
-        r"(mon adresse|j'habite à)\s+[\w\s\d]+",  # "mon adresse est 12 rue X"
-        r"(mon email|mon e-?mail)\s+[\w\.\-]+@[\w\.\-]+\.\w+",  # email
-        r"(mon numéro|mon téléphone|tél)\s+[\d\s]+",            # téléphone
-    ]
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
-
-def contains_alert_keywords(text):
-    alert_patterns = [
-        r"suicid",                   # couvre "suicide", "suicidaires", etc.
-        r"idées?\s+suicidaires?",    # "idée suicidaire", "idées suicidaires"
-        r"automutil",                # "automutilation", "automutilé", etc.
-        r"dépression",               # "dépression"
-        r"je veux me tuer",
-        r"je n'en peux plus",
-        r"je me fais du mal",
-        r"en finir",                 # "en finir avec la vie"
-        r"idées noires",
-    ]
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in alert_patterns)
-
-
-def read_pdf_ocr(pdf_path):
-    print("📖 Lecture du PDF...")
+def read_pdf_ocr(pdf_path: str) -> str:
+    print("📖 OCR du PDF en cours...")
     pages_text = []
 
-
-    print("🖼️ Conversion du PDF en images...")
-    pages = convert_from_path(pdf_path, poppler_path=POPLER_PATH)
-    print(f"✅ {len(pages)} page(s) convertie(s)")
-
+    pages = convert_from_path(pdf_path)
 
     for i, page in enumerate(pages):
-        print(f"🔍 Extraction texte page {i+1}...")
-        # ✅ Essaie avec plusieurs langues si c'est un PDF français
-        page_text = pytesseract.image_to_string(page, lang="eng+fra")  
-        pages_text.append(page_text)
-        print(f"   Caractères extraits: {len(page_text)}")
-
+        print(f"🔍 OCR page {i + 1}")
+        text = pytesseract.image_to_string(page, lang="eng+fra")
+        pages_text.append(text)
 
     full_text = "\n\n=== PAGE BREAK ===\n\n".join(pages_text)
-    print(f"✅ Texte total extrait: {len(full_text)} caractères")
-   
-    # Affiche un aperçu
-    print(f"📄 Aperçu du texte:\n{full_text[:500]}\n...")
-   
+    print(f"✅ OCR terminé ({len(full_text)} caractères)")
     return full_text
 
 
-# Lire le PDF au démarrage
-PDF_TEXT = read_pdf_ocr(PDF_PATH)
+def get_pdf_text() -> str:
+    global PDF_TEXT
+    if PDF_TEXT is None:
+        PDF_TEXT = read_pdf_ocr(PDF_PATH)
+    return PDF_TEXT
 
+
+# =====================
+# FILTRES DE SÉCURITÉ
+# =====================
+
+def contains_personal_info(text: str) -> bool:
+    patterns = [
+        r"je m'?appelle\s+\w+",
+        r"j'ai\s+\d+\s*ans",
+        r"(mon adresse|j'habite à)",
+        r"(mon email|mon e-?mail)",
+        r"(mon numéro|mon téléphone|tél)",
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+def contains_alert_keywords(text: str) -> bool:
+    patterns = [
+        r"suicid",
+        r"idées?\s+suicidaires?",
+        r"automutil",
+        r"dépression",
+        r"je veux me tuer",
+        r"je n'en peux plus",
+        r"idées noires",
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+# =====================
+# ROUTES
+# =====================
 
 @app.route("/debug-pdf", methods=["GET"])
 def debug_pdf():
-    """Affiche le texte extrait du PDF pour debug"""
+    text = get_pdf_text()
     return jsonify({
-        "pdf_length": len(PDF_TEXT),
-        "pdf_preview": PDF_TEXT[:2000],
-        "total_chars": len(PDF_TEXT),
-        "contains_endometriosis": "endometriosis" in PDF_TEXT.lower()
+        "pdf_length": len(text),
+        "preview": text[:2000]
     })
 
 
@@ -98,84 +121,108 @@ def debug_pdf():
 def ask():
     data = request.get_json()
     question = data.get("question", "").strip()
-   
+
     if not question:
         return jsonify({"error": "Question vide"}), 400
 
     if contains_personal_info(question):
-        return jsonify({"answer": "Attention, pour ta sécurité, ne diffuse pas d'informations personnelles te concernant"})
+        return jsonify({
+            "answer": "Attention, ne partage pas d'informations personnelles."
+        })
 
-    # Mots sensibles
     if contains_alert_keywords(question):
-        print(f"⚠️ ALERT: mot sensible détecté: {question}")
-        return jsonify({"answer": "Si tu ne te sens pas bien, c'est toujours mieux d'en parler à un adulte de confiance qu'une machine! ;)"})
-    # ✅ Tronquer le PDF si trop long
-    max_chars = 400000
-    pdf_content = PDF_TEXT if len(PDF_TEXT) <= max_chars else PDF_TEXT[:max_chars] + "\n\n[...TRUNCATED...]"
-   
-    print(f"📊 Longueur du contexte envoyé: {len(pdf_content)} caractères")
+        return jsonify({
+            "answer": "Parle-en à un adulte de confiance. Je ne peux pas aider sur ce sujet."
+        })
 
-    # 🔹 Préparer la requête Gemini comme avant
+    pdf_text = get_pdf_text()
+    max_chars = 400_000
+    context = pdf_text[:max_chars]
+
     body = {
         "contents": [
             {
                 "parts": [
                     {
-                        "text": f"""You are a medical assistant that answers questions ONLY based on the provided PDF document about endometriosis.
+                        "text": f"""
+You are a medical assistant.
+Answer ONLY using the provided PDF content.
+If the answer is not in the PDF, say:
+"Je ne peux pas répondre à ce genre de questions."
 
-INSTRUCTIONS:
-- Answer the question using ONLY information from the PDF below.
-- Give only a concise definition or short answer. Do NOT provide long explanations.
-- If the PDF contains the answer, provide a short definition.
-- If the information is not in the PDF, say: "Je ne peux pas répondre à ce genre de questions, restez dans le thème que l'instructeur a donné s'il vous plait"
+PDF CONTENT:
+{context}
 
-PDF DOCUMENT CONTENT:
-{pdf_content}
+QUESTION:
+{question}
 
-USER QUESTION: {question}
-
-ANSWER:"""
+ANSWER:
+"""
                     }
                 ]
             }
         ],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 1000,
-            "topP": 0.95,
-            "topK": 40
+            "maxOutputTokens": 1000
         }
     }
 
     try:
-        print(f"📤 Envoi de la question à Gemini: {question}")
         response = requests.post(GEMINI_API_URL, json=body, timeout=60)
         response.raise_for_status()
         result = response.json()
-       
         answer = result["candidates"][0]["content"]["parts"][0]["text"]
-        print(f"✅ Réponse reçue ({len(answer)} chars): {answer[:200]}...")
-       
-    except requests.exceptions.HTTPError as e:
-        print(f"❌ Erreur HTTP {response.status_code}: {e}")
-        print(f"📄 Réponse API: {response.text}")
-        answer = "Error: Unable to generate response."
-    except KeyError as e:
-        print(f"❌ Erreur de structure: {e}")
-        print(f"📄 Réponse complète: {result}")
-        answer = "Error: Unexpected API response format."
+
     except Exception as e:
-        print(f"❌ Erreur: {e}")
-        answer = f"Error: {str(e)}"
+        print(f"❌ Gemini error: {e}")
+        answer = "Erreur lors de la génération de la réponse."
 
     return jsonify({"answer": answer})
 
 
+# =====================
+# ROUTES ADMIN
+# =====================
 
-if __name__ == "__main__":
-    print("✅ Utilisation du modèle: gemini-2.5-flash")
-    print("🚀 Backend démarré sur http://127.0.0.1:5000")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+@app.route("/admin/delete_student", methods=["POST"])
+def delete_student():
+    if not firebase_app:
+        return jsonify({"error": "Firebase Admin indisponible"}), 500
+
+    uid = request.json.get("uid")
+    if not uid:
+        return jsonify({"error": "UID manquant"}), 400
+
+    try:
+        auth.delete_user(uid)
+        return jsonify({"success": True})
+    except auth.UserNotFoundError:
+        return jsonify({"error": "Utilisateur introuvable"}), 404
 
 
+@app.route("/admin/reset_password", methods=["POST"])
+def reset_password():
+    if not firebase_app:
+        return jsonify({"error": "Firebase Admin indisponible"}), 500
 
+    data = request.json
+    uid = data.get("uid")
+    password = data.get("password")
+
+    if not uid or not password:
+        return jsonify({"error": "UID ou mot de passe manquant"}), 400
+
+    try:
+        auth.update_user(uid, password=password)
+        return jsonify({"success": True})
+    except auth.UserNotFoundError:
+        return jsonify({"error": "Utilisateur introuvable"}), 404
+
+
+@app.route("/admin/health", methods=["GET"])
+def admin_health():
+    return jsonify({
+        "firebase_admin": firebase_app is not None,
+        "status": "ok"
+    })

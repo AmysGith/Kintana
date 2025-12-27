@@ -1,0 +1,8 @@
+Flask
+flask-cors
+pytesseract
+pdf2image
+requests
+python-dotenv
+firebase-admin
+gunicorn
