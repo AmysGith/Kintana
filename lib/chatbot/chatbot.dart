@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+import '../config.dart';
 
 void main() {
   runApp(const ChatApp());
@@ -105,7 +106,7 @@ class _ChatPageState extends State<ChatPage> {
     _scrollToBottom();
 
     try {
-      final url = Uri.parse("http://127.0.0.1:5000/ask");
+      final url = Uri.parse("${AppConfig.backendUrl}/ask");
 
       final res = await http
           .post(

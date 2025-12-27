@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'responsive_utils.dart';
+import 'config.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({super.key});
@@ -29,7 +30,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   final Color _amberDust = const Color(0xFFC7A16B);
   final Color _backgroundBeige = const Color(0xFFEEE3D6);
 
-  static const String backendUrl = 'http://127.0.0.1:5000';
+ static const String backendUrl = AppConfig.backendUrl;
 
   String _randomPassword(int length) {
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
