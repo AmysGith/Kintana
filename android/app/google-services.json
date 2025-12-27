@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "267564132458",
+    "project_id": "kintana-7bd0d",
+    "storage_bucket": "kintana-7bd0d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:267564132458:android:b7721ee8488512c45a4213",
+        "android_client_info": {
+          "package_name": "com.example.kintana"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQxJFzlYemXSfbWO65vLPv8NVgy6vD3W4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
