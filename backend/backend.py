@@ -10,6 +10,7 @@ import pytesseract
 from pdf2image import convert_from_path
 from firebase_admin import credentials, auth, initialize_app
 from dotenv import load_dotenv
+import urllib.request
 
 # =====================
 # INITIALISATION
@@ -50,15 +51,32 @@ GEMINI_API_URL = (
 # OCR PDF
 # =====================
 PDF_PATH = "doc.pdf"
+PDF_URL = "https://drive.google.com/uc?export=download&id=1DqplBzVyymKAcwWpIiS9B1gqhdVIQrrp"
 PDF_TEXT = None
 
+# Télécharger le PDF si absent
+if not os.path.exists(PDF_PATH) and PDF_URL:
+    try:
+        print("📥 Téléchargement du PDF depuis Drive...")
+        urllib.request.urlretrieve(PDF_URL, PDF_PATH)
+        print("✅ PDF téléchargé")
+    except Exception as e:
+        print(f"❌ Erreur téléchargement PDF: {e}")
+
 def read_pdf_ocr(pdf_path: str) -> str:
-    pages_text = []
-    pages = convert_from_path(pdf_path)
-    for i, page in enumerate(pages):
-        text = pytesseract.image_to_string(page, lang="eng+fra")
-        pages_text.append(text)
-    return "\n\n=== PAGE BREAK ===\n\n".join(pages_text)
+    if not os.path.exists(pdf_path):
+        print("⚠️ PDF introuvable")
+        return "Document médical non disponible."
+    try:
+        pages_text = []
+        pages = convert_from_path(pdf_path)
+        for i, page in enumerate(pages):
+            text = pytesseract.image_to_string(page, lang="eng+fra")
+            pages_text.append(text)
+        return "\n\n=== PAGE BREAK ===\n\n".join(pages_text)
+    except Exception as e:
+        print(f"❌ Erreur lecture PDF: {e}")
+        return "Erreur lors de la lecture du document."
 
 def get_pdf_text() -> str:
     global PDF_TEXT
@@ -94,10 +112,19 @@ def contains_alert_keywords(text: str) -> bool:
 # =====================
 # ROUTES
 # =====================
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "ok",
+        "message": "KINTANA Backend API",
+        "endpoints": ["/ask", "/debug-pdf", "/admin/health"]
+    })
+
 @app.route("/debug-pdf", methods=["GET"])
 def debug_pdf():
     text = get_pdf_text()
     return jsonify({
+        "pdf_exists": os.path.exists(PDF_PATH),
         "pdf_length": len(text),
         "preview": text[:2000]
     })
@@ -178,12 +205,16 @@ def reset_password():
 
 @app.route("/admin/health", methods=["GET"])
 def admin_health():
-    return jsonify({"firebase_admin": firebase_app is not None, "status": "ok"})
+    return jsonify({
+        "firebase_admin": firebase_app is not None, 
+        "pdf_exists": os.path.exists(PDF_PATH),
+        "status": "ok"
+    })
 
 # =====================
 # LANCEMENT
 # =====================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000)) 
+    port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Backend démarré sur http://0.0.0.0:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False) 
+    app.run(host="0.0.0.0", port=port, debug=False)

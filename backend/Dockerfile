@@ -1,7 +1,6 @@
-# Utilise Python 3.12 slim (plus récent)
 FROM python:3.12-slim
 
-# Installer Tesseract et Poppler pour l'OCR
+# Installer Tesseract et Poppler
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-fra \
@@ -11,14 +10,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copier uniquement les fichiers nécessaires
-COPY backend.py requirements.txt doc.pdf ./
-
-# Installer les dépendances
+# Copier les dépendances
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port attendu par Flask
-EXPOSE 5000
+# Copier le code
+COPY backend.py .
 
-# Lancer le backend Flask
-CMD ["python", "backend.py"]
+# Port dynamique Render
+ENV PORT=5000
+EXPOSE $PORT
+
+# Lancer avec gunicorn
+CMD gunicorn backend:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
