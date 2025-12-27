@@ -114,7 +114,7 @@ class _ChatPageState extends State<ChatPage> {
             headers: {"Content-Type": "application/json"},
             body: jsonEncode({"question": question}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 50));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
