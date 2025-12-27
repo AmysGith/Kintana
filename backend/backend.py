@@ -6,21 +6,23 @@ import re
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from firebase_admin import credentials, auth, initialize_app, firestore
-import urllib.request
-from pdf2image import convert_from_path
 import pytesseract
+from pdf2image import convert_from_path
+from firebase_admin import credentials, auth, initialize_app, firestore
+from dotenv import load_dotenv
 
 # =====================
 # INITIALISATION
 # =====================
+load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
 # =====================
-# FIREBASE ADMIN via variable d'environnement
+# FIREBASE ADMIN
 # =====================
 firebase_app = None
+db = None
 try:
     firebase_b64 = os.environ.get("FIREBASE_CREDENTIALS_B64")
     if firebase_b64:
@@ -47,10 +49,38 @@ GEMINI_API_URL = (
 )
 
 # =====================
-# PDF CONFIG
+# PDF
 # =====================
-PDF_PATH = "doc.pdf"
-PDF_URL = "https://drive.google.com/uc?export=download&id=1DqplBzVyymKAcwWpIiS9B1gqhdVIQrrp"
+PDF_PATH = "doc.pdf"  # le fichier doit être présent dans backend/
+PDF_TEXT = None
+
+def read_pdf_ocr(pdf_path: str) -> str:
+    if not os.path.exists(pdf_path):
+        print("⚠️ PDF introuvable")
+        return "Document médical non disponible."
+    try:
+        pages_text = []
+        pages = convert_from_path(pdf_path)
+        for i, page in enumerate(pages):
+            text = pytesseract.image_to_string(page, lang="eng+fra")
+            pages_text.append(text)
+        full_text = "\n\n=== PAGE BREAK ===\n\n".join(pages_text)
+        # Préfixer le titre
+        return "PCOS\n\n" + full_text
+    except Exception as e:
+        print(f"❌ Erreur lecture PDF: {e}")
+        return "Erreur lors de la lecture du document."
+
+def get_pdf_text() -> str:
+    global PDF_TEXT
+    if PDF_TEXT is None:
+        PDF_TEXT = read_pdf_ocr(PDF_PATH)
+        # Stocker dans Firestore
+        if db:
+            doc_ref = db.collection("pdf_texts").document("medical_doc")
+            doc_ref.set({"content": PDF_TEXT})
+            print("✅ Texte PDF stocké dans Firestore")
+    return PDF_TEXT
 
 # =====================
 # FILTRES DE SÉCURITÉ
@@ -78,57 +108,6 @@ def contains_alert_keywords(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 # =====================
-# ENDPOINT /init
-# =====================
-def ocr_and_store():
-    # Télécharger le PDF si absent
-    if not os.path.exists(PDF_PATH):
-        try:
-            print("📥 Téléchargement du PDF depuis Drive...")
-            urllib.request.urlretrieve(PDF_URL, PDF_PATH)
-            print("✅ PDF téléchargé")
-        except Exception as e:
-            print(f"❌ Erreur téléchargement PDF: {e}")
-            return None
-
-    # OCR PDF
-    try:
-        pages = convert_from_path(PDF_PATH)
-        text = "\n\n=== PAGE BREAK ===\n\n".join(
-            [pytesseract.image_to_string(p, lang="eng+fra") for p in pages]
-        )
-        # Stocker dans Firestore
-        db.collection("pdf_texts").document("medical_doc").set({"content": text})
-        print("✅ Texte OCR stocké dans Firestore")
-        return text
-    except Exception as e:
-        print(f"❌ Erreur OCR: {e}")
-        return None
-
-@app.route("/init", methods=["GET"])
-def init():
-    text = ocr_and_store()
-    if text:
-        return jsonify({"status": "ok", "length": len(text)})
-    else:
-        return jsonify({"status": "error"}), 500
-
-# =====================
-# GET PDF TEXT FROM FIRESTORE
-# =====================
-def get_pdf_text():
-    try:
-        doc_ref = db.collection("pdf_texts").document("medical_doc")
-        doc = doc_ref.get()
-        if doc.exists:
-            return doc.to_dict().get("content", "")
-        else:
-            return "Document médical non disponible."
-    except Exception as e:
-        print(f"❌ Erreur récupération PDF Firestore: {e}")
-        return "Document médical non disponible."
-
-# =====================
 # ROUTES
 # =====================
 @app.route("/", methods=["GET"])
@@ -136,7 +115,21 @@ def home():
     return jsonify({
         "status": "ok",
         "message": "KINTANA Backend API",
-        "endpoints": ["/ask", "/init", "/admin/health"]
+        "endpoints": ["/init", "/ask", "/debug-pdf", "/admin/health"]
+    })
+
+@app.route("/init", methods=["GET"])
+def init_pdf():
+    text = get_pdf_text()
+    return jsonify({"status": "ok", "pdf_length": len(text)})
+
+@app.route("/debug-pdf", methods=["GET"])
+def debug_pdf():
+    text = get_pdf_text()
+    return jsonify({
+        "pdf_exists": os.path.exists(PDF_PATH),
+        "pdf_length": len(text),
+        "preview": text[:2000]
     })
 
 @app.route("/ask", methods=["POST"])
@@ -156,8 +149,7 @@ def ask():
     body = {
         "contents": [{"parts":[{"text": f"""
 You are a medical assistant.
-Answer ONLY using the provided PDF content.
-If the answer is not in the PDF, say:
+Answer using the provided PDF content. If unsure, say:
 "Je ne peux pas répondre à ce genre de questions."
 
 PDF CONTENT:
